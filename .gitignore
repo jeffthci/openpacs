@@ -1,0 +1,38 @@
+# Environment - never commit secrets
+.env
+.env.*
+!.env.example
+
+# Docker override - machine specific
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.npm/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/settings.json
+
+# Data directories - never commit patient data
+storage/
+staging/
+postgres/
+redis/

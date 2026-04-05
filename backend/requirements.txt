@@ -1,0 +1,35 @@
+# Core
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+psycopg2-binary>=2.9.9
+
+# DICOM
+pydicom>=2.4.3
+pynetdicom>=2.0.2
+
+# Auth
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.9
+
+# Async task queue (Phase 1 gap fix)
+celery[redis]>=5.3.6
+redis>=5.0.1
+
+# PDF generation (existing)
+reportlab>=4.1.0
+
+# Optional: DICOM compression (install separately if needed)
+# gdcm         - for transfer syntax conversion
+# pylibjpeg    - for JPEG2000 / JPEG-LS
+# pylibjpeg-libjpeg
+# pylibjpeg-openjpeg
+
+# Dev
+httpx>=0.27.0

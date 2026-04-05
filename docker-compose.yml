@@ -1,0 +1,165 @@
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════════════════
+#  OpenPACS — Complete Stack
+#  All secrets/ports come from .env — never hardcode here
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-pacsdb}
+      POSTGRES_USER:     ${POSTGRES_USER:-pacs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pacs} -d ${POSTGRES_DB:-pacsdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis (Celery broker) ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── FastAPI backend + DICOM SCP ───────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL:         ${DATABASE_URL}
+      REDIS_URL:            ${REDIS_URL:-redis://redis:6379/0}
+      DICOM_STORAGE_PATH:   ${DICOM_STORAGE_PATH:-/opt/pacs/storage}
+      DICOM_STAGING_PATH:   ${DICOM_STAGING_PATH:-/opt/pacs/staging}
+      WADO_BASE_URL:        ${WADO_BASE_URL}
+      SECRET_KEY:           ${SECRET_KEY}
+      AE_TITLE:             ${AE_TITLE:-OPENPACS}
+      DICOM_PORT:           ${DICOM_PORT:-11112}
+      DUPLICATE_SOP_POLICY: ${DUPLICATE_SOP_POLICY:-ignore}
+      CORS_ORIGINS:         ${CORS_ORIGINS}
+    volumes:
+      - pacsdata:/opt/pacs
+    ports:
+      - "${API_PORT:-8000}:8000"
+      - "${DICOM_PORT:-11112}:11112/tcp"
+      - "${DICOM_PORT:-11112}:11112/udp"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Celery worker (ingest + routing) ─────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: >
+      celery -A services.work_queue worker
+      --loglevel=info
+      -Q high,default
+      --concurrency=4
+    env_file: .env
+    environment:
+      DATABASE_URL:       ${DATABASE_URL}
+      REDIS_URL:          ${REDIS_URL:-redis://redis:6379/0}
+      DICOM_STORAGE_PATH: ${DICOM_STORAGE_PATH:-/opt/pacs/storage}
+      DICOM_STAGING_PATH: ${DICOM_STAGING_PATH:-/opt/pacs/staging}
+      AE_TITLE:           ${AE_TITLE:-OPENPACS}
+    volumes:
+      - pacsdata:/opt/pacs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Celery beat scheduler ─────────────────────────────────────
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: >
+      celery -A services.work_queue beat
+      --loglevel=info
+      --scheduler celery.beat:PersistentScheduler
+    env_file: .env
+    environment:
+      DATABASE_URL:       ${DATABASE_URL}
+      REDIS_URL:          ${REDIS_URL:-redis://redis:6379/0}
+      DICOM_STORAGE_PATH: ${DICOM_STORAGE_PATH:-/opt/pacs/storage}
+    volumes:
+      - pacsdata:/opt/pacs
+      - beatschedule:/app/celerybeat
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # ── React frontend ────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    env_file: .env
+    environment:
+      VITE_API_URL:  ${VITE_API_URL}
+      VITE_OHIF_URL: ${VITE_OHIF_URL}
+    ports:
+      - "${WEB_PORT:-8080}:5173"
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── OHIF Viewer (optional, enable with --profile ohif) ────────
+  ohif:
+    image: ohif/app:latest
+    profiles: ["ohif"]
+    volumes:
+      - ./ohif-config.js:/usr/share/nginx/html/app-config.js:ro
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  # ── Nginx reverse proxy (enable with --profile prod) ──────────
+  nginx:
+    image: nginx:alpine
+    profiles: ["prod"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
+  pacsdata:
+  beatschedule:
